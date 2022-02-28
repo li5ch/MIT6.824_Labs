@@ -52,11 +52,20 @@ type Raft struct {
 	persister *Persister          // Object to hold this peer's persisted state
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
-
+	currentTerm int
+	votedFor []int
+	logEntries []LogEntry
+	commitIndex int
+	lastApplied int
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
 
+}
+
+type LogEntry struct {
+	command string
+	term int
 }
 
 // return currentTerm and whether this server
@@ -66,6 +75,9 @@ func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
 	// Your code here (2A).
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	term = rf.currentTerm
 	return term, isleader
 }
 
@@ -117,6 +129,10 @@ func (rf *Raft) readPersist(data []byte) {
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	term int
+	candidateId int
+	lastLogIndex int
+	lastLogTerm int
 }
 
 //
@@ -125,6 +141,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
+	term int
+	voteGranted bool
 }
 
 //
@@ -132,6 +150,11 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	if args.term < rf.currentTerm {
+		reply.voteGranted =false
+		reply.term = rf.currentTerm
+	}
+
 }
 
 //
