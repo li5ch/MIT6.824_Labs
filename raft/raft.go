@@ -87,7 +87,7 @@ type Raft struct {
 }
 
 type LogEntry struct {
-	command string
+	command interface{}
 	term    int
 }
 
@@ -284,27 +284,33 @@ func (rf *Raft) election() {
 			rf.votedFor = rf.me
 			rf.StartElection()
 			rf.mu.Unlock()
-		case <- rf.heartbeatTimer.C:
+		case <-rf.heartbeatTimer.C:
 
 		}
 	}
 }
 
 type AppendEntriesRequest struct {
-	term int
-	leaderId int
+	term         int
+	leaderId     int
 	prevLogIndex int
-	prevLogTerm int
-	entries []LogEntry
+	prevLogTerm  int
+	entries      []LogEntry
 	leaderCommit int
 }
 
 type AppendEntriesReply struct {
-	term int
-	success bool
+	term          int
+	conflictIndex int
+	conflictTerm  int
+	success       bool
 }
 
-func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesRequest, reply *AppendEntriesReply)bool{
+func match(prevLogIndex int, term int) {
+	
+}
+
+func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesRequest, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
@@ -312,16 +318,40 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesRequest, reply 
 func (rf *Raft) AppendEntries(args *AppendEntriesRequest, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if args.term < rf.currentTerm{
+	if args.term < rf.currentTerm {
 		reply.success = false
 		reply.term = rf.currentTerm
 		return
 	}
-	if args.prevLogIndex > len(rf.logEntries) || rf.logEntries[args.prevLogIndex].term!= args.prevLogTerm {
-		reply.success =false
+	if args.prevLogIndex > len(rf.logEntries) || rf.logEntries[args.prevLogIndex].term != args.prevLogTerm {
+		reply.success = false
 		return
 	}
-	
+	if args.term > rf.currentTerm {
+		rf.currentTerm, rf.votedFor = args.term, None
+	}
+	rf.state = Follower
+	rf.electionTimer.Reset(GetRandomElectionTimeout())
+
+	if len(rf.logEntries) > args.prevLogIndex+1 && args.term != rf.logEntries[args.prevLogIndex+1].term {
+		// 删除索引
+		logEntries := make([]LogEntry, 0, args.prevLogIndex+1)
+		logEntries = append(logEntries, rf.logEntries[:args.prevLogIndex+1]...)
+		rf.logEntries = logEntries
+		reply.success = false
+		reply.term = rf.currentTerm
+		return
+	}
+	rf.logEntries = append(rf.logEntries, args.entries...)
+	if rf.commitIndex < args.leaderCommit {
+		if args.leaderCommit < len(rf.logEntries) -1 {
+			rf.commitIndex = args.leaderCommit
+		}else{
+			rf.commitIndex = len(rf.logEntries) - 1
+		}
+	}
+	reply.success = true
+	reply.term = args.term
 
 }
 
@@ -349,26 +379,26 @@ func (rf *Raft) StartElection() {
 			rf.mu.Lock()
 			defer rf.mu.Unlock()
 			if reply.voteGranted {
-				count ++
-			}else{
+				count++
+			} else {
 				if reply.term > rf.currentTerm {
 					rf.currentTerm = reply.term
 				}
 			}
-			finished ++
+			finished++
 			cond.Broadcast()
 		}(i)
 
 	}
 	rf.mu.Lock()
-	for count<=len(rf.peers)/2 && finished!=len(rf.peers){
+	for count <= len(rf.peers)/2 && finished != len(rf.peers) {
 		cond.Wait()
 	}
-	if count>len(rf.peers)/2 {
+	if count > len(rf.peers)/2 {
 		rf.state = Leader
 
-	}else{
-		DPrintf("election failed votes:%d,finished:%d",count,finished)
+	} else {
+		DPrintf("election failed votes:%d,finished:%d", count, finished)
 	}
 	rf.mu.Unlock()
 }
